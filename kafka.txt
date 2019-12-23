@@ -1,0 +1,20 @@
+~/kafka/bin/kafka-server-stop.sh
+~/kafka/bin/zookeeper-server-stop.sh
+
+
+
+
+CREATE A TOPIC
+bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic inputTopic
+
+GET TOPICS LIST
+bin/kafka-topics.sh --list --bootstrap-server localhost:9092
+
+SEND A MESSAGE
+echo '{"Action":"something","Message":{"partitions":[{"name":"c:","driveType":3,"metric":{"usedSpaceBytes":342734824,"totalSpaceBytes":34273482423}},{"name":"d:","driveType":3,"metric":{"usedSpaceBytes":942734824,"totalSpaceBytes":904273482423}}],"createAtTimeUTC":"2017-08-07T08:38:43.3059476Z"}}' | bin/kafka-console-producer.sh --broker-list localhost:9092 --topic inputTopic > /dev/null
+
+START A CONSUMER
+bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic inputTopic --from-beginning
+
+DELETE A TOPIC
+bin/kafka-topics.sh --zookeeper localhost:2181 --delete --topic inputTopic

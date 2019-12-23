@@ -1,0 +1,30 @@
+[
+    {
+        "inputTopic": "inputTopic",
+        "destinationTopic": "destinationTopic",
+        "graph": {
+            "Message": {
+                "createAtTimeUTC": "$createAtTimeUTC",
+                "partitions": [
+                    {
+                        "name": "$name",
+                        "driveType": "$driveType",
+                        "metric": {
+                            "usedSpaceBytes": "$usedSpaceBytes",
+                            "totalSpaceBytes": "$totalSpaceBytes"
+                        }
+                    }
+               ]
+            }
+        },
+        "destinationMessage": {
+            "data": {
+                "name": "$name",
+                "driveType": "$driveType",
+                "usedSpaceBytes": "$usedSpaceBytes",
+                "totalSpaceBytes": "$totalSpaceBytes",
+                "createAtTimeUTC": "$createAtTimeUTC"
+            }
+        }
+    }
+]
