@@ -38,7 +38,7 @@ func readFlattenerConfig() (string, string, map[string]interface{}, map[string]s
 	destinationTopic = fullConfig[0]["destinationTopic"].(string)
 
 	// Read inputSignature and make conversionMap
-	inputSignature := fullConfig[0]["graph"].(map[string]interface{})
+	inputSignature := fullConfig[0]["graph"].(map[string]interface{})["Message"].(map[string]interface{})
 	conversionMap = make(map[string]string)
 	createConversionMap(inputSignature, conversionMap)
 
@@ -77,16 +77,15 @@ func main() {
 		}
 		stringInput := string(rawInput.Value)
 		fmt.Println("Input body:", stringInput)*/
-		// Convert one input message to some amount of output messages
+		// Convert one input message to some amount of output messages.
 		stringInput := `{"Action":"something","Message":{"partitions":[{"name":"c:","driveType":3,"metric":{"usedSpaceBytes":342734824,"totalSpaceBytes":34273482423}},{"name":"d:","driveType":3,"metric":{"usedSpaceBytes":942734824,"totalSpaceBytes":904273482423}}],"createAtTimeUTC":"2017-08-07T08:38:43.3059476Z"}}`
-		fmt.Println(stringInput)
-		os.Exit(0)
-		fmt.Println("Converting messages")
+		//fmt.Println("Converting messages")
 		outputMessages := convertMessage(stringInput)
 		// And send them
 		fmt.Println("Writing messages to topic", destinationTopic, ":", outputMessages)
 		//err = writeTextMessage(writer, outputMessages)
 		//fmt.Println("Errors:", err)
+		os.Exit((0))
 	}
 }
 
@@ -108,33 +107,30 @@ func getWriter() *kafka.Writer {
 	return writer
 }
 
-func convertMessage(inputMessage string) (outputMessages []interface{}) {
-	var rawResult map[string]interface{}
-	json.Unmarshal([]byte(inputMessage), &rawResult)
+func convertMessage(inputString string) (outputMessages []string) {
+	// Convert message from JSON to map.
+	var inputMap map[string]interface{}
+	json.Unmarshal([]byte(inputString), &inputMap)
+	fullMessage := inputMap["Message"].(map[string]interface{})
 
-	messages := rawResult["Message"].(map[string]interface{})
-	createAtTimeUTC := messages["createAtTimeUTC"]
-	partitions := messages["partitions"].([]interface{})
-
-	result := make([]interface{}, len(partitions)) // Make a result array
-
-	for num, message := range partitions {
-		currentMessage := message.(map[string]interface{})
-		metric := currentMessage["metric"].(map[string]interface{})
-		payloadData := map[string]interface{}{
-			"name":            currentMessage["name"],
-			"driveType":       currentMessage["driveType"],
-			"usedSpaceBytes":  int(metric["usedSpaceBytes"].(float64)),  // Convert from float64 to int
-			"totalSpaceBytes": int(metric["totalSpaceBytes"].(float64)), // Convert from float64 to int
-			"createAtTimeUTC": createAtTimeUTC,
+	// Get data that isn't part of partitions.
+	messageWithoutPartitions := make(map[string]interface{})
+	for key, value := range fullMessage {
+		if key != "partitions" {
+			messageWithoutPartitions[key] = value
 		}
-		resultMessage := map[string]map[string]interface{}{
-			"payloadData": payloadData,
-		}
-		result[num] = resultMessage
 	}
 
-	return result
+	// Message with some partitions -> one message per partitions.
+	partitions := fullMessage["partitions"].([]interface{})
+	// Merge partitions with non-partitions data.
+	for _, value := range partitions {
+		for k, v := range messageWithoutPartitions {
+			value.(map[string]interface{})[k] = v
+		}
+	}
+	os.Exit(0)
+	return outputMessages
 }
 
 func writeTextMessage(writer *kafka.Writer, messages []interface{}) error {
