@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"reflect"
+	"strconv"
 
 	"github.com/segmentio/kafka-go"
 )
@@ -64,28 +65,26 @@ func createConversionMap(destinationSignature map[string]interface{}, conversion
 
 // Infinite loop of consumer -> read -> transform -> write
 func main() {
-	/*reader := getReader()
+	reader := getReader()
 	writer := getWriter()
 	defer reader.Close()
-	defer writer.Close()*/
+	defer writer.Close()
 	for {
-		/*fmt.Println("Reading input from topic", inputTopic)
+		fmt.Println("Reading input from topic", inputTopic)
 		rawInput, err := reader.ReadMessage(context.Background())
 		fmt.Println("Errors:", err)
 		if err != nil {
 			break
 		}
 		stringInput := string(rawInput.Value)
-		fmt.Println("Input body:", stringInput)*/
+		fmt.Println("Input body:", stringInput)
 		// Convert one input message to some amount of output messages.
-		stringInput := `{"Action":"something","Message":{"partitions":[{"name":"c:","driveType":3,"metric":{"usedSpaceBytes":342734824,"totalSpaceBytes":34273482423}},{"name":"d:","driveType":3,"metric":{"usedSpaceBytes":942734824,"totalSpaceBytes":904273482423}}],"createAtTimeUTC":"2017-08-07T08:38:43.3059476Z"}}`
-		//fmt.Println("Converting messages")
+		fmt.Println("Converting messages")
 		outputMessages := convertMessage(stringInput)
 		// And send them
 		fmt.Println("Writing messages to topic", destinationTopic, ":", outputMessages)
-		//err = writeTextMessage(writer, outputMessages)
-		//fmt.Println("Errors:", err)
-		os.Exit((0))
+		err = writeTextMessage(writer, outputMessages)
+		fmt.Println("Errors:", err)
 	}
 }
 
@@ -107,7 +106,7 @@ func getWriter() *kafka.Writer {
 	return writer
 }
 
-func convertMessage(inputString string) (outputMessages []string) {
+func convertMessage(inputString string) (outputMessages []map[string]interface{}) {
 	// Convert message from JSON to map.
 	var inputMap map[string]interface{}
 	json.Unmarshal([]byte(inputString), &inputMap)
@@ -115,11 +114,8 @@ func convertMessage(inputString string) (outputMessages []string) {
 
 	// Get data that isn't part of partitions.
 	messageWithoutPartitions := make(map[string]interface{})
-	for key, value := range fullMessage {
-		if key != "partitions" {
-			messageWithoutPartitions[key] = value
-		}
-	}
+	copyMap(messageWithoutPartitions, fullMessage)
+	delete(messageWithoutPartitions, "partitions")
 
 	// Message with some partitions -> one message per partitions.
 	partitions := fullMessage["partitions"].([]interface{})
@@ -129,11 +125,70 @@ func convertMessage(inputString string) (outputMessages []string) {
 			value.(map[string]interface{})[k] = v
 		}
 	}
-	os.Exit(0)
+	// Plainify messages (make them just map[string]string).
+	plainMessages := make([]map[string]string, len(partitions))
+	for i, message := range partitions {
+		plainMessage := make(map[string]string)
+		plainifyMessage(plainMessage, message.(map[string]interface{}))
+		plainMessages[i] = plainMessage
+	}
+
+	// Fill destination messages with real data.
+	outputMessages = make([]map[string]interface{}, len(partitions))
+	for i, plainMessage := range plainMessages {
+		destMessage := make(map[string]interface{})
+		copyMap(destMessage, destinationSignature)
+		fillDestMessageWithData(destMessage, conversionMap, plainMessage)
+		outputMessages[i] = destMessage
+	}
+
 	return outputMessages
 }
 
-func writeTextMessage(writer *kafka.Writer, messages []interface{}) error {
+func fillDestMessageWithData(destMessage map[string]interface{}, conversionMap map[string]string, plainMessage map[string]string) {
+	for fieldName, placeholder := range destMessage {
+		switch placeholder.(type) {
+		case map[string]interface{}:
+			fillDestMessageWithData(destMessage[fieldName].(map[string]interface{}), conversionMap, plainMessage)
+		default:
+			if inputMessageKey, ok := conversionMap[placeholder.(string)]; ok {
+				if valueToInsert, okok := plainMessage[inputMessageKey]; okok {
+					destMessage[fieldName] = valueToInsert
+					continue
+				}
+			}
+		}
+	}
+}
+
+func copyMap(destinationMap map[string]interface{}, sourceMap map[string]interface{}) {
+	for fieldName, fieldValue := range sourceMap {
+		switch sourceMap[fieldName].(type) {
+		case map[string]interface{}:
+			destinationMap[fieldName] = map[string]interface{}{}
+			copyMap(destinationMap[fieldName].(map[string]interface{}), sourceMap[fieldName].(map[string]interface{}))
+		default:
+			destinationMap[fieldName] = fieldValue
+		}
+	}
+}
+
+func plainifyMessage(plainMessage map[string]string, message map[string]interface{}) {
+	for fieldName, fieldValue := range message {
+		varType := reflect.TypeOf(fieldValue).Kind()
+		if varType == reflect.Map || varType == reflect.Slice {
+			plainifyMessage(plainMessage, fieldValue.(map[string]interface{}))
+		} else {
+			if varType == reflect.Float64 {
+				plainMessage[string(fieldName)] = strconv.Itoa(int(fieldValue.(float64)))
+			} else {
+				plainMessage[string(fieldName)] = fieldValue.(string)
+			}
+		}
+	}
+}
+
+func writeTextMessage(writer *kafka.Writer, messages []map[string]interface{}) error {
 	var err error
 	for _, message := range messages {
 		json, err := json.Marshal(message)
