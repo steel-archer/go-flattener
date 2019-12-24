@@ -65,8 +65,8 @@ func createConversionMap(destSignature map[string]interface{}, conversionMap map
 
 // Infinite loop of consumer -> read -> transform -> write
 func main() {
-	reader := getReader()
-	writer := getWriter()
+	reader := getReader(server, inputTopic)
+	writer := getWriter(server, destTopic)
 	defer reader.Close()
 	defer writer.Close()
 	for {
@@ -89,19 +89,19 @@ func main() {
 	}
 }
 
-func getReader() *kafka.Reader {
+func getReader(server string, topic string) *kafka.Reader {
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:   []string{server},
-		Topic:     inputTopic,
-		Partition: 0, // ATM read from the beginning
+		Topic:     topic,
+		Partition: 0,
 	})
 	return reader
 }
 
-func getWriter() *kafka.Writer {
+func getWriter(server string, topic string) *kafka.Writer {
 	writer := kafka.NewWriter(kafka.WriterConfig{
 		Brokers:  []string{server},
-		Topic:    destTopic,
+		Topic:    topic,
 		Balancer: &kafka.LeastBytes{},
 	})
 	return writer
