@@ -14,12 +14,12 @@ import (
 
 var server = "localhost:9092"
 var inputTopic string
-var destinationTopic string
-var destinationSignature map[string]interface{}
+var destTopic string
+var destSignature map[string]interface{}
 var conversionMap map[string]string
 
 func init() {
-	inputTopic, destinationTopic, destinationSignature, conversionMap = readFlattenerConfig()
+	inputTopic, destTopic, destSignature, conversionMap = readFlattenerConfig()
 }
 
 func readFlattenerConfig() (string, string, map[string]interface{}, map[string]string) {
@@ -36,21 +36,21 @@ func readFlattenerConfig() (string, string, map[string]interface{}, map[string]s
 
 	// Read topics' names
 	inputTopic = fullConfig[0]["inputTopic"].(string)
-	destinationTopic = fullConfig[0]["destinationTopic"].(string)
+	destTopic = fullConfig[0]["destinationTopic"].(string)
 
 	// Read inputSignature and make conversionMap
 	inputSignature := fullConfig[0]["graph"].(map[string]interface{})["Message"].(map[string]interface{})
 	conversionMap = make(map[string]string)
 	createConversionMap(inputSignature, conversionMap)
 
-	// Read destinationSignature
-	destinationSignature := fullConfig[0]["destinationMessage"].(map[string]interface{})
+	// Read destSignature
+	destSignature := fullConfig[0]["destinationMessage"].(map[string]interface{})
 
-	return inputTopic, destinationTopic, destinationSignature, conversionMap
+	return inputTopic, destTopic, destSignature, conversionMap
 }
 
-func createConversionMap(destinationSignature map[string]interface{}, conversionMap map[string]string) {
-	for key, value := range destinationSignature {
+func createConversionMap(destSignature map[string]interface{}, conversionMap map[string]string) {
+	for key, value := range destSignature {
 		if reflect.TypeOf(value).Kind() == reflect.Map {
 			createConversionMap(value.(map[string]interface{}), conversionMap)
 		} else if reflect.ValueOf(value).Kind() == reflect.Slice {
@@ -70,7 +70,7 @@ func main() {
 	defer reader.Close()
 	defer writer.Close()
 	for {
-		fmt.Println("Reading input from topic", inputTopic)
+		fmt.Println("Reading input from input topic")
 		rawInput, err := reader.ReadMessage(context.Background())
 		fmt.Println("Errors:", err)
 		if err != nil {
@@ -78,13 +78,14 @@ func main() {
 		}
 		stringInput := string(rawInput.Value)
 		fmt.Println("Input body:", stringInput)
-		// Convert one input message to some amount of output messages.
-		fmt.Println("Converting messages")
-		outputMessages := convertMessage(stringInput)
+		// Convert one input Msg to some amount of output Msgs.
+		fmt.Println("Converting msgs")
+		outputMsgs := convertMsg(stringInput)
 		// And send them
-		fmt.Println("Writing messages to topic", destinationTopic, ":", outputMessages)
-		err = writeTextMessage(writer, outputMessages)
+		fmt.Println("Writing msgs to dest topic:", outputMsgs)
+		err = writeTextMsg(writer, outputMsgs)
 		fmt.Println("Errors:", err)
+		fmt.Println("")
 	}
 }
 
@@ -100,60 +101,65 @@ func getReader() *kafka.Reader {
 func getWriter() *kafka.Writer {
 	writer := kafka.NewWriter(kafka.WriterConfig{
 		Brokers:  []string{server},
-		Topic:    destinationTopic,
+		Topic:    destTopic,
 		Balancer: &kafka.LeastBytes{},
 	})
 	return writer
 }
 
-func convertMessage(inputString string) (outputMessages []map[string]interface{}) {
-	// Convert message from JSON to map.
+// Gets input json and returns array of maps
+func convertMsg(inputString string) (outputMsgs []map[string]interface{}) {
+	// Convert Msg from JSON to map.
 	var inputMap map[string]interface{}
 	json.Unmarshal([]byte(inputString), &inputMap)
-	fullMessage := inputMap["Message"].(map[string]interface{})
+	fullMsg := inputMap["Message"].(map[string]interface{})
 
 	// Get data that isn't part of partitions.
-	messageWithoutPartitions := make(map[string]interface{})
-	copyMap(messageWithoutPartitions, fullMessage)
-	delete(messageWithoutPartitions, "partitions")
+	MsgWithoutPartitions := make(map[string]interface{})
+	for key, value := range fullMsg {
+		if key != "partitions" {
+			MsgWithoutPartitions[key] = value
+		}
+	}
 
-	// Message with some partitions -> one message per partitions.
-	partitions := fullMessage["partitions"].([]interface{})
+	// Msg with some partitions -> one Msg per partitions.
+	partitions := fullMsg["partitions"].([]interface{})
 	// Merge partitions with non-partitions data.
 	for _, value := range partitions {
-		for k, v := range messageWithoutPartitions {
+		for k, v := range MsgWithoutPartitions {
 			value.(map[string]interface{})[k] = v
 		}
 	}
-	// Plainify messages (make them just map[string]string).
-	plainMessages := make([]map[string]string, len(partitions))
-	for i, message := range partitions {
-		plainMessage := make(map[string]string)
-		plainifyMessage(plainMessage, message.(map[string]interface{}))
-		plainMessages[i] = plainMessage
+	// Plainify Msgs (make them just map[string]string).
+	plainMsgs := make([]map[string]string, len(partitions))
+	for i, Msg := range partitions {
+		plainMsg := make(map[string]string)
+		plainifyMsg(plainMsg, Msg.(map[string]interface{}))
+		plainMsgs[i] = plainMsg
 	}
 
-	// Fill destination messages with real data.
-	outputMessages = make([]map[string]interface{}, len(partitions))
-	for i, plainMessage := range plainMessages {
-		destMessage := make(map[string]interface{})
-		copyMap(destMessage, destinationSignature)
-		fillDestMessageWithData(destMessage, conversionMap, plainMessage)
-		outputMessages[i] = destMessage
+	// Fill dest Msgs with real data.
+	outputMsgs = make([]map[string]interface{}, len(partitions))
+	for i, plainMsg := range plainMsgs {
+		destMsg := make(map[string]interface{})
+		copyMap(destMsg, destSignature)
+		fillDestMsgWithData(destMsg, conversionMap, plainMsg)
+		outputMsgs[i] = destMsg
 	}
 
-	return outputMessages
+	return outputMsgs
 }
 
-func fillDestMessageWithData(destMessage map[string]interface{}, conversionMap map[string]string, plainMessage map[string]string) {
-	for fieldName, placeholder := range destMessage {
+// Fill Msg template with real data.
+func fillDestMsgWithData(destMsg map[string]interface{}, conversionMap map[string]string, plainMsg map[string]string) {
+	for fieldName, placeholder := range destMsg {
 		switch placeholder.(type) {
 		case map[string]interface{}:
-			fillDestMessageWithData(destMessage[fieldName].(map[string]interface{}), conversionMap, plainMessage)
+			fillDestMsgWithData(destMsg[fieldName].(map[string]interface{}), conversionMap, plainMsg)
 		default:
-			if inputMessageKey, ok := conversionMap[placeholder.(string)]; ok {
-				if valueToInsert, okok := plainMessage[inputMessageKey]; okok {
-					destMessage[fieldName] = valueToInsert
+			if inputMsgKey, ok := conversionMap[placeholder.(string)]; ok {
+				if valueToInsert, okok := plainMsg[inputMsgKey]; okok {
+					destMsg[fieldName] = valueToInsert
 					continue
 				}
 			}
@@ -161,37 +167,38 @@ func fillDestMessageWithData(destMessage map[string]interface{}, conversionMap m
 	}
 }
 
-func copyMap(destinationMap map[string]interface{}, sourceMap map[string]interface{}) {
+// Function or deep nested maps copying.
+func copyMap(destMap map[string]interface{}, sourceMap map[string]interface{}) {
 	for fieldName, fieldValue := range sourceMap {
 		switch sourceMap[fieldName].(type) {
 		case map[string]interface{}:
-			destinationMap[fieldName] = map[string]interface{}{}
-			copyMap(destinationMap[fieldName].(map[string]interface{}), sourceMap[fieldName].(map[string]interface{}))
+			destMap[fieldName] = map[string]interface{}{}
+			copyMap(destMap[fieldName].(map[string]interface{}), sourceMap[fieldName].(map[string]interface{}))
 		default:
-			destinationMap[fieldName] = fieldValue
+			destMap[fieldName] = fieldValue
 		}
 	}
 }
 
-func plainifyMessage(plainMessage map[string]string, message map[string]interface{}) {
-	for fieldName, fieldValue := range message {
+func plainifyMsg(plainMsg map[string]string, Msg map[string]interface{}) {
+	for fieldName, fieldValue := range Msg {
 		varType := reflect.TypeOf(fieldValue).Kind()
 		if varType == reflect.Map || varType == reflect.Slice {
-			plainifyMessage(plainMessage, fieldValue.(map[string]interface{}))
+			plainifyMsg(plainMsg, fieldValue.(map[string]interface{}))
 		} else {
 			if varType == reflect.Float64 {
-				plainMessage[string(fieldName)] = strconv.Itoa(int(fieldValue.(float64)))
+				plainMsg[string(fieldName)] = strconv.Itoa(int(fieldValue.(float64)))
 			} else {
-				plainMessage[string(fieldName)] = fieldValue.(string)
+				plainMsg[string(fieldName)] = fieldValue.(string)
 			}
 		}
 	}
 }
 
-func writeTextMessage(writer *kafka.Writer, messages []map[string]interface{}) error {
+func writeTextMsg(writer *kafka.Writer, Msgs []map[string]interface{}) error {
 	var err error
-	for _, message := range messages {
-		json, err := json.Marshal(message)
+	for _, Msg := range Msgs {
+		json, err := json.Marshal(Msg)
 		if err != nil {
 			break
 		}
