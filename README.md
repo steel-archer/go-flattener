@@ -2,6 +2,7 @@
 
 *Prerequisites:*
 * "github.com/segmentio/kafka-go" package
+* Kafka server address is: _localhost:9092_
 
 *Our files:*
 * flatteners.json - our config file
