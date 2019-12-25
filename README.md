@@ -1,5 +1,8 @@
 # go-flattener
 
+*Prerequisites:*
+* "github.com/segmentio/kafka-go" package
+
 *Our files:*
 * flatteners.json - our config file
 * flattener.go - main program
