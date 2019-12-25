@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -65,24 +66,23 @@ func createConversionMap(destSignature map[string]interface{}, conversionMap map
 
 // Infinite loop of consumer -> read -> transform -> write
 func main() {
+	fmt.Println("Initializing kafka reader and writer")
 	reader := getReader(server, inputTopic)
 	writer := getWriter(server, destTopic)
 	defer reader.Close()
 	defer writer.Close()
 	for {
-		fmt.Println("Reading input from input topic")
+		fmt.Println("Reading messages from an input topic")
 		rawInput, err := reader.ReadMessage(context.Background())
 		fmt.Println("Errors:", err)
 		if err != nil {
 			break
 		}
 		stringInput := string(rawInput.Value)
-		fmt.Println("Input body:", stringInput)
 		// Convert one input Msg to some amount of output Msgs.
-		fmt.Println("Converting msgs")
 		outputMsgs := convertMsg(stringInput)
 		// And send them
-		fmt.Println("Writing msgs to dest topic:", outputMsgs)
+		fmt.Println("Writing messages to a destination topic")
 		err = writeTextMsg(writer, outputMsgs)
 		fmt.Println("Errors:", err)
 		fmt.Println("")
@@ -143,19 +143,25 @@ func convertMsg(inputString string) (outputMsgs []map[string]interface{}) {
 	for i, plainMsg := range plainMsgs {
 		destMsg := make(map[string]interface{})
 		copyMap(destMsg, destSignature)
-		fillDestMsgWithData(destMsg, conversionMap, plainMsg)
-		outputMsgs[i] = destMsg
+		err := fillDestMsgWithData(destMsg, conversionMap, plainMsg)
+		if err == nil {
+			outputMsgs[i] = destMsg
+		}
+		// Else we'll just have empty map and writer will skip it.
 	}
-
 	return outputMsgs
 }
 
 // Fill Msg template with real data.
-func fillDestMsgWithData(destMsg map[string]interface{}, conversionMap map[string]string, plainMsg map[string]string) {
+func fillDestMsgWithData(destMsg map[string]interface{}, conversionMap map[string]string, plainMsg map[string]string) (err error) {
+	err = nil
 	for fieldName, placeholder := range destMsg {
 		switch placeholder.(type) {
 		case map[string]interface{}:
-			fillDestMsgWithData(destMsg[fieldName].(map[string]interface{}), conversionMap, plainMsg)
+			err = fillDestMsgWithData(destMsg[fieldName].(map[string]interface{}), conversionMap, plainMsg)
+			if err != nil {
+				return err
+			}
 		default:
 			if inputMsgKey, ok := conversionMap[placeholder.(string)]; ok {
 				if valueToInsert, okok := plainMsg[inputMsgKey]; okok {
@@ -163,8 +169,13 @@ func fillDestMsgWithData(destMsg map[string]interface{}, conversionMap map[strin
 					continue
 				}
 			}
+			// Validation error.
+			errMsg := "Dest signature contains field '" + fieldName + "' that is not present in input message. Skip message."
+			err = errors.New(errMsg)
+			return err
 		}
 	}
+	return err
 }
 
 // Function or deep nested maps copying.
@@ -198,11 +209,14 @@ func plainifyMsg(plainMsg map[string]string, Msg map[string]interface{}) {
 func writeTextMsg(writer *kafka.Writer, Msgs []map[string]interface{}) error {
 	var err error
 	for _, Msg := range Msgs {
+		// Empty msg
+		if len(Msg) == 0 {
+			continue
+		}
 		json, err := json.Marshal(Msg)
 		if err != nil {
 			break
 		}
-		fmt.Println("Jsoned output:", string(json))
 		err = writer.WriteMessages(context.Background(), kafka.Message{
 			Key:   []byte(""),
 			Value: json,
