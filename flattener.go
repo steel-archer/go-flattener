@@ -79,8 +79,12 @@ func main() {
 			break
 		}
 		stringInput := string(rawInput.Value)
+		fmt.Println("Input body:", stringInput)
 		// Convert one input Msg to some amount of output Msgs.
+		fmt.Println("Converting msgs")
 		outputMsgs := convertMsg(stringInput)
+		fmt.Println("Output msgs")
+		fmt.Println(outputMsgs)
 		// And send them
 		fmt.Println("Writing messages to a destination topic")
 		err = writeTextMsg(writer, outputMsgs)
