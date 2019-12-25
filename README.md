@@ -1,7 +1,16 @@
 # go-flattener
+
+For this task we should make some assumptions about flatteners.json structure (and input/outpus messages structure as well):
+* Top element of flatteners.json is an array with 1 element (program should be extended if we want to work with multiple flattener scenarios).
+* This element contains sub-elements "inputTopic", "destinationTopic", "graph", "destinationMessage".
+* "graph" contains "Message".
+* "Message" contains "partitions" what is an array.
+* Except "partitions" "Message" can contain another data that is common fot all partitions.
+* Elements of "partitions" can have any structure.
+
 * flatteners.json - our config file
 * flattener.go - main program
-* test_producer.go and test_consumer.go - for testing purposes, first creates one message and latter works and reads messages from the specified topic.
+* example_producer.go and example_consumer.go - for testing purposes, first creates one message and latter works and reads messages from the specified topic.
 
 Example of flattener.go output:
 ```
